@@ -180,7 +180,6 @@ namespace Il2CppDumper
                 fieldOffsets = Array.ConvertAll(MapVATR<uint>(pMetadataRegistration.fieldOffsets, pMetadataRegistration.fieldOffsetsCount), x => (ulong)x);
             }
             var pTypes = MapVATR<ulong>(pMetadataRegistration.types, pMetadataRegistration.typesCount);
-            Console.WriteLine($"pMetadataRegistration.typesCount: {pMetadataRegistration.typesCount}");
             types = new Il2CppType[pMetadataRegistration.typesCount];
             for (var i = 0; i < pMetadataRegistration.typesCount; ++i)
             {

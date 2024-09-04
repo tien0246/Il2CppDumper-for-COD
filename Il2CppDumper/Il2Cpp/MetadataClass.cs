@@ -161,7 +161,7 @@ namespace Il2CppDumper
         public short rgctxCount;
         public short genericContainerIndex;
         public short eventStart;
-        public short propertyStart;
+        public ushort propertyStart;
         public short nestedTypesStart;
         public short interfacesStart;
         public short interfaceOffsetsStart;
