@@ -185,7 +185,12 @@ namespace Il2CppDumper
             {
                 types[i] = MapVATR<Il2CppType>(pTypes[i]);
                 types[i].Init(Version);
-                typeDic.Add(pTypes[i], types[i]);
+                typeDic[pTypes[i]] = types[i];
+                var normalizedTypePointer = NormalizePointer(pTypes[i]);
+                if (normalizedTypePointer != pTypes[i])
+                {
+                    typeDic[normalizedTypePointer] = types[i];
+                }
             }
             if (Version >= 24.2)
             {
@@ -303,9 +308,25 @@ namespace Il2CppDumper
         {
             if (!typeDic.TryGetValue(pointer, out var type))
             {
-                return null;
+                var normalizedPointer = NormalizePointer(pointer);
+                if (normalizedPointer == pointer || !typeDic.TryGetValue(normalizedPointer, out type))
+                {
+                    return null;
+                }
             }
             return type;
+        }
+
+        private ulong NormalizePointer(ulong pointer)
+        {
+            try
+            {
+                return MapRTVA(MapVATR(pointer));
+            }
+            catch
+            {
+                return pointer;
+            }
         }
 
         public ulong GetMethodPointer(string imageName, Il2CppMethodDefinition methodDef)

@@ -68,7 +68,16 @@ namespace Il2CppDumper
 
         public override ulong MapVATR(ulong addr)
         {
-            var section = sections.First(x => addr >= x.addr && addr <= x.addr + x.size);
+            var section = sections.FirstOrDefault(x => addr >= x.addr && addr <= x.addr + x.size);
+            if (section == null && addr < vmaddr)
+            {
+                addr += vmaddr;
+                section = sections.FirstOrDefault(x => addr >= x.addr && addr <= x.addr + x.size);
+            }
+            if (section == null)
+            {
+                throw new ArgumentOutOfRangeException(nameof(addr), $"Address 0x{addr:x} is not inside a mapped Mach-O section.");
+            }
             if (section.sectname == "__bss")
             {
                 throw new Exception();
@@ -94,11 +103,10 @@ namespace Il2CppDumper
         {
             var codeRegistration = 0ul;
             var metadataRegistration = 0ul;
+            var initFunctionAddresses = GetInitFunctionAddresses();
             if (Version < 23)
             {
-                var __mod_init_func = sections.First(x => x.sectname == "__mod_init_func");
-                var addrs = ReadClassArray<ulong>(__mod_init_func.offset, __mod_init_func.size / 8);
-                foreach (var i in addrs)
+                foreach (var i in initFunctionAddresses)
                 {
                     if (i > 0)
                     {
@@ -162,9 +170,7 @@ namespace Il2CppDumper
                  * MOV W3, #0
                  * B sub
                  */
-                var __mod_init_func = sections.First(x => x.sectname == "__mod_init_func");
-                var addrs = ReadClassArray<ulong>(__mod_init_func.offset, __mod_init_func.size / 8);
-                foreach (var i in addrs)
+                foreach (var i in initFunctionAddresses)
                 {
                     if (i > 0)
                     {
@@ -199,9 +205,7 @@ namespace Il2CppDumper
                  * MOV X2, #0
                  * B sub
                  */
-                var __mod_init_func = sections.First(x => x.sectname == "__mod_init_func");
-                var addrs = ReadClassArray<ulong>(__mod_init_func.offset, __mod_init_func.size / 8);
-                foreach (var i in addrs)
+                foreach (var i in initFunctionAddresses)
                 {
                     if (i > 0)
                     {
@@ -234,6 +238,24 @@ namespace Il2CppDumper
                 return true;
             }
             return false;
+        }
+
+        private ulong[] GetInitFunctionAddresses()
+        {
+            var modInitFuncSection = sections.FirstOrDefault(x => x.sectname == "__mod_init_func");
+            if (modInitFuncSection != null)
+            {
+                return ReadClassArray<ulong>(modInitFuncSection.offset, modInitFuncSection.size / 8);
+            }
+
+            var initOffsetsSection = sections.FirstOrDefault(x => x.sectname == "__init_offsets");
+            if (initOffsetsSection == null)
+            {
+                return Array.Empty<ulong>();
+            }
+
+            var offsets = ReadClassArray<uint>(initOffsetsSection.offset, initOffsetsSection.size / 4);
+            return Array.ConvertAll(offsets, offset => offset == 0 ? 0ul : vmaddr + offset);
         }
 
         public override bool PlusSearch(int methodCount, int typeDefinitionsCount, int imageCount)
