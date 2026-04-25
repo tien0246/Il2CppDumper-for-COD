@@ -180,14 +180,132 @@ namespace Il2CppDumper
             }
         }
 
+        // https://android.googlesource.com/platform/bionic/+/refs/heads/main/linker/linker_reloc_iterators.h
+        // https://android.googlesource.com/platform/bionic/+/refs/heads/main/linker/linker_reloc_iterators.h
+        private List<Elf64_Rela> ReadAndroidRelocations(ulong offset, ulong size)
+        {
+            const ulong RELOCATION_GROUPED_BY_INFO_FLAG = 1;
+            const ulong RELOCATION_GROUPED_BY_OFFSET_DELTA_FLAG = 2;
+            const ulong RELOCATION_GROUPED_BY_ADDEND_FLAG = 4;
+            const ulong RELOCATION_GROUP_HAS_ADDEND_FLAG = 8;
+
+            var result = new List<Elf64_Rela>();
+            Position = offset;
+
+            var magic = ReadBytes(4);
+            if (magic[0] != 'A' || magic[1] != 'P' || magic[2] != 'S' || magic[3] != '2')
+            {
+                return result;
+            }
+
+            ulong numRelocs = ReadSleb128();
+            var reloc = new Elf64_Rela
+            {
+                r_offset = ReadSleb128()
+            };
+
+            for (ulong idx = 0; idx < numRelocs;)
+            {
+                ulong groupSize = ReadSleb128();
+                ulong groupFlags = ReadSleb128();
+
+                ulong groupROffsetDelta = 0;
+                if ((groupFlags & RELOCATION_GROUPED_BY_OFFSET_DELTA_FLAG) != 0)
+                {
+                    groupROffsetDelta = ReadSleb128();
+                }
+
+                if ((groupFlags & RELOCATION_GROUPED_BY_INFO_FLAG) != 0)
+                {
+                    reloc.r_info = ReadSleb128();
+                }
+
+                ulong groupFlagsReloc = groupFlags & (RELOCATION_GROUP_HAS_ADDEND_FLAG | RELOCATION_GROUPED_BY_ADDEND_FLAG);
+                if (groupFlagsReloc == RELOCATION_GROUP_HAS_ADDEND_FLAG)
+                {
+                    // Each relocation has an addend. This is the default situation with lld's current encoder.
+                }
+                else if (groupFlagsReloc == (RELOCATION_GROUP_HAS_ADDEND_FLAG | RELOCATION_GROUPED_BY_ADDEND_FLAG))
+                {
+                    reloc.r_addend += ReadSleb128();
+                }
+                else
+                {
+                    reloc.r_addend = 0;
+                }
+
+                for (ulong i = 0; i < groupSize; i++)
+                {
+                    if ((groupFlags & RELOCATION_GROUPED_BY_OFFSET_DELTA_FLAG) != 0)
+                    {
+                        reloc.r_offset += groupROffsetDelta;
+                    }
+                    else
+                    {
+                        reloc.r_offset += ReadSleb128();
+                    }
+
+                    if ((groupFlags & RELOCATION_GROUPED_BY_INFO_FLAG) == 0)
+                    {
+                        reloc.r_info = ReadSleb128();
+                    }
+
+                    if (groupFlagsReloc == RELOCATION_GROUP_HAS_ADDEND_FLAG)
+                    {
+                        reloc.r_addend += ReadSleb128();
+                    }
+
+                    result.Add(new Elf64_Rela
+                    {
+                        r_offset = reloc.r_offset,
+                        r_info = reloc.r_info,
+                        r_addend = reloc.r_addend
+                    });
+                }
+
+                idx += groupSize;
+            }
+
+            return result;
+        }
+        private ulong ReadSleb128()
+        {
+            ulong value = 0;
+            int shift = 0;
+            byte b;
+            do
+            {
+                b = ReadByte();
+                value |= (ulong)(b & 0x7f) << shift;
+                shift += 7;
+            } while ((b & 0x80) != 0);
+
+            if (shift < 64 && (b & 0x40) != 0)
+                value |= ~0UL << shift;
+
+            return value;
+        }
+
         private void RelocationProcessing()
         {
             Console.WriteLine("Applying relocations...");
             try
             {
-                var relaOffset = MapVATR(dynamicSection.First(x => x.d_tag == DT_RELA).d_un);
-                var relaSize = dynamicSection.First(x => x.d_tag == DT_RELASZ).d_un;
-                var relaTable = ReadClassArray<Elf64_Rela>(relaOffset, relaSize / 24L);
+                var relaTable = new List<Elf64_Rela>();
+                if (dynamicSection.Any(x => x.d_tag == DT_RELA))
+                {
+                    var relaOffset = MapVATR(dynamicSection.First(x => x.d_tag == DT_RELA).d_un);
+                    var relaSize = dynamicSection.First(x => x.d_tag == DT_RELASZ).d_un;
+                    relaTable.AddRange(ReadClassArray<Elf64_Rela>(relaOffset, relaSize / 24L));
+                }
+
+                if (dynamicSection.Any(x => x.d_tag == DT_ANDROID_RELA))
+                {
+                    var androidRelaOffset = MapVATR(dynamicSection.First(x => x.d_tag == DT_ANDROID_RELA).d_un);
+                    var androidRelaSize = dynamicSection.First(x => x.d_tag == DT_ANDROID_RELASZ).d_un;
+                    relaTable.AddRange(ReadAndroidRelocations(androidRelaOffset, androidRelaSize));
+                }
+
                 foreach (var rela in relaTable)
                 {
                     var type = rela.r_info & 0xffffffff;
